@@ -25,6 +25,12 @@ zabbix_export:
         * Check: ["perm","/storage",["Datastore.Audit"]]
         * Check: ["perm","/vms",["VM.Audit"]]
         
+        The following API paths are accessed per node (covered by Sys.Audit on /):
+        
+        * /nodes/{node}/certificates/info
+        * /nodes/{node}/disks/list
+        * /nodes/{node}/disks/smart?disk={disk}
+        
         2. Copy the resulting Token ID and Secret into the host macros '{$PVE.TOKEN.ID}' and '{$PVE.TOKEN.SECRET}'.
         
         3. Set the hostname or IP address of the Proxmox VE API host in the '{$PVE.URL.HOST}' macro. You can also change the API port in the '{$PVE.URL.PORT}' macro if necessary.
@@ -132,6 +138,292 @@ zabbix_export:
           tags:
             - tag: component
               value: raw
+        - uuid: 32778446364146e2b823da2967f9c053
+          name: 'Cluster: Nodes online'
+          type: DEPENDENT
+          key: proxmox.cluster.nodes.online
+          delay: '0'
+          description: 'Number of online nodes in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node' && data[i].status === 'online') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 2fd0f3d76a8b415d8d8c4ac1cc7534a0
+          name: 'Cluster: Nodes offline'
+          type: DEPENDENT
+          key: proxmox.cluster.nodes.offline
+          delay: '0'
+          description: 'Number of offline nodes in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node' && data[i].status !== 'online') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 9dbf170490524de08c9414852781a5a9
+          name: 'Cluster: CPU total'
+          type: DEPENDENT
+          key: proxmox.cluster.cpu.total
+          delay: '0'
+          description: 'Total number of CPUs across all nodes in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var total = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node') total += (data[i].maxcpu || 0);
+                  }
+                  return total;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+            - tag: component
+              value: cpu
+        - uuid: b7316ad3cdcf4599892db1bee2ff430d
+          name: 'Cluster: CPU utilization'
+          type: DEPENDENT
+          key: proxmox.cluster.cpu.utilization
+          delay: '0'
+          value_type: FLOAT
+          units: '%'
+          description: 'Average CPU utilization across all online nodes in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var cpuSum = 0, nodeCount = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node' && data[i].status === 'online') {
+                      cpuSum += (data[i].cpu || 0);
+                      nodeCount++;
+                    }
+                  }
+                  return nodeCount > 0 ? Math.round(cpuSum / nodeCount * 10000) / 100 : 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+            - tag: component
+              value: cpu
+        - uuid: f5abbea8306f49d08fa0396ef31197d0
+          name: 'Cluster: Memory total'
+          type: DEPENDENT
+          key: proxmox.cluster.memory.total
+          delay: '0'
+          units: B
+          description: 'Total memory across all nodes in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var total = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node') total += (data[i].maxmem || 0);
+                  }
+                  return total;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+            - tag: component
+              value: memory
+        - uuid: edda0bff4a0d44ad85103bf0bf98bcb8
+          name: 'Cluster: Memory used'
+          type: DEPENDENT
+          key: proxmox.cluster.memory.used
+          delay: '0'
+          units: B
+          description: 'Total memory used across all nodes in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var used = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node') used += (data[i].mem || 0);
+                  }
+                  return used;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+            - tag: component
+              value: memory
+        - uuid: d193281dc54645adbe076e00c603292c
+          name: 'Cluster: Memory utilization'
+          type: DEPENDENT
+          key: proxmox.cluster.memory.utilization
+          delay: '0'
+          value_type: FLOAT
+          units: '%'
+          description: 'Memory utilization percentage across the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var used = 0, total = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'node') {
+                      used += (data[i].mem || 0);
+                      total += (data[i].maxmem || 0);
+                    }
+                  }
+                  return total > 0 ? Math.round(used / total * 10000) / 100 : 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+            - tag: component
+              value: memory
+        - uuid: c88fe480b8464fc8a1208f31d0d9b2be
+          name: 'Cluster: VMs running'
+          type: DEPENDENT
+          key: proxmox.cluster.vms.running
+          delay: '0'
+          description: 'Number of running QEMU virtual machines in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'qemu' && data[i].status === 'running') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 275865c54c084d06b010f3eabf81750f
+          name: 'Cluster: VMs stopped'
+          type: DEPENDENT
+          key: proxmox.cluster.vms.stopped
+          delay: '0'
+          description: 'Number of stopped QEMU virtual machines in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'qemu' && data[i].status !== 'running') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: fb9d9edc83364b68b51c5f764c23cebf
+          name: 'Cluster: LXC running'
+          type: DEPENDENT
+          key: proxmox.cluster.lxc.running
+          delay: '0'
+          description: 'Number of running LXC containers in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'lxc' && data[i].status === 'running') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 6375d64335c14d598506d58fec623c49
+          name: 'Cluster: LXC stopped'
+          type: DEPENDENT
+          key: proxmox.cluster.lxc.stopped
+          delay: '0'
+          description: 'Number of stopped LXC containers in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'lxc' && data[i].status !== 'running') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.cluster.resources
+          tags:
+            - tag: component
+              value: cluster
       discovery_rules:
         - uuid: e01bb8d7614144ba82e31d91618dee31
           name: 'Cluster discovery'
@@ -199,9 +491,6 @@ zabbix_export:
                 value: '{$PVE.LXC.TAGS.NOT_MATCHES}'
                 operator: NOT_MATCHES_REGEX
                 formulaid: B
-              - macro: '{#LXC.TAGS}'
-                operator: DOES_NOT_EXIST
-                formulaid: C
           item_prototypes:
             - uuid: dda211b14d7b4c419196a98ee5153307
               name: 'LXC [{#NODE.NAME}/{#LXC.NAME} ({#LXC.ID})]: CPU usage'
@@ -571,7 +860,7 @@ zabbix_export:
                   manual_close: 'YES'
                   dependencies:
                     - name: 'Proxmox VE: LXC [{#NODE.NAME}/{#LXC.NAME} ({#LXC.ID})]: Not running'
-                      expression: 'last(/Proxmox VE by HTTP/proxmox.lxc.vmstatus[{#LXC.ID}])<>"running"'
+                      expression: 'last(/Proxmox VE by HTTP/proxmox.lxc.vmstatus[{#LXC.ID}])<>"running" and last(/Proxmox VE by HTTP/proxmox.lxc.onboot[{#LXC.ID}])=1'
                   tags:
                     - tag: scope
                       value: notice
@@ -1234,7 +1523,259 @@ zabbix_export:
                   value: system
                 - tag: node
                   value: '{#NODE.NAME}'
+            - uuid: dc590bb0aabf46a0bf940a5fa59e2f47
+              name: 'Node [{#NODE.NAME}]: Get certificates'
+              type: HTTP_AGENT
+              key: 'proxmox.node.certs.get[{#NODE.NAME}]'
+              delay: 12h
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Retrieves all certificate data from the node {#NODE.NAME}.'
+              url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/certificates/info'
+              headers:
+                - name: Authorization
+                  value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+              tags:
+                - tag: component
+                  value: raw
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 0c39ed3d2b6a45bc93c2095ab3152628
+              name: 'Node [{#NODE.NAME}]: Certificate soonest expiry'
+              type: DEPENDENT
+              key: 'proxmox.node.cert.notafter.soonest[{#NODE.NAME}]'
+              delay: '0'
+              units: unixtime
+              description: 'The earliest expiry date among all certificates on the node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      var soonest = Infinity;
+                      for (var i = 0; i < data.length; i++) {
+                        if (typeof data[i].notafter !== 'undefined' && data[i].notafter < soonest) {
+                          soonest = data[i].notafter;
+                        }
+                      }
+                      return soonest === Infinity ? 0 : soonest;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.certs.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: certificates
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: b4f25fa052b145b0ba37ad53b00b598c
+              name: 'Node [{#NODE.NAME}]: Certificate expiring soonest name'
+              type: DEPENDENT
+              key: 'proxmox.node.cert.expiring.name[{#NODE.NAME}]'
+              delay: '0'
+              value_type: CHAR
+              trends: '0'
+              description: 'The filename of the certificate expiring soonest on the node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      var soonest = Infinity, name = '';
+                      for (var i = 0; i < data.length; i++) {
+                        if (typeof data[i].notafter !== 'undefined' && data[i].notafter < soonest) {
+                          soonest = data[i].notafter;
+                          name = data[i].filename || '';
+                        }
+                      }
+                      return name;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.certs.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: certificates
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 45e3497c8338426eb2c906e7b85af387
+              name: 'Node [{#NODE.NAME}]: Certificate count'
+              type: DEPENDENT
+              key: 'proxmox.node.cert.count[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Total number of certificates on the node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      return data.length;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.certs.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: certificates
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 7d8101ae7f494f9ebe9cf0c671e86a49
+              name: 'Node [{#NODE.NAME}]: Get disks'
+              type: HTTP_AGENT
+              key: 'proxmox.node.disks.get[{#NODE.NAME}]'
+              delay: 1h
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Retrieves the list of physical disks from the node {#NODE.NAME}.'
+              url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/disks/list'
+              headers:
+                - name: Authorization
+                  value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+              tags:
+                - tag: component
+                  value: raw
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 46095227f0e0477fac7545e21e23c910
+              name: 'Node [{#NODE.NAME}]: Disk count'
+              type: DEPENDENT
+              key: 'proxmox.node.disk.count[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Total number of physical disks on the node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      return data.length;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.disks.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: disk
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 60ad31138c0d4a3ab77568390c664dcc
+              name: 'Node [{#NODE.NAME}]: Disk inventory'
+              type: DEPENDENT
+              key: 'proxmox.node.disk.inventory[{#NODE.NAME}]'
+              delay: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Summary of all physical disks on the node {#NODE.NAME} (devpath, model, serial, type, vendor).'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      var result = [];
+                      for (var i = 0; i < data.length; i++) {
+                        var d = data[i];
+                        result.push({
+                          devpath: d.devpath || '',
+                          model: d.model || '',
+                          serial: d.serial || '',
+                          type: d.type || '',
+                          vendor: d.vendor || '',
+                          size: d.size || 0
+                        });
+                      }
+                      return JSON.stringify(result);
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.disks.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: disk
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 12a9f44630514b12831af5dd6af7294b
+              name: 'Node [{#NODE.NAME}]: SMART status'
+              type: SCRIPT
+              key: 'proxmox.node.disk.smart[{#NODE.NAME}]'
+              delay: 1h
+              description: 'Checks SMART health for all disks on the node {#NODE.NAME}. Returns 1 if all healthy, 0 if any disk has a SMART failure. Drives reporting UNKNOWN or missing health data are skipped (e.g. behind RAID controllers or lacking SMART support).'
+              valuemap:
+                name: 'Disk SMART status'
+              params: |
+                var params = JSON.parse(value);
+                var req = new HttpRequest();
+                req.addHeader('Authorization: PVEAPIToken=' + params.token_id + '=' + params.token);
+                var base = 'https://' + params.url + ':' + params.port + '/api2/json';
+
+                var disksResp = req.get(base + '/nodes/' + params.node + '/disks/list');
+                if (req.getStatus() !== 200) return 1;
+
+                var disks = JSON.parse(disksResp).data;
+                for (var i = 0; i < disks.length; i++) {
+                  try {
+                    var smartResp = req.get(base + '/nodes/' + params.node + '/disks/smart?disk=' + encodeURIComponent(disks[i].devpath));
+                    if (req.getStatus() === 200) {
+                      var health = JSON.parse(smartResp).data.health;
+                      if (health && health !== 'PASSED' && health !== 'OK' && health !== 'UNKNOWN') return 0;
+                    }
+                  } catch (e) {}
+                }
+                return 1;
+              preprocessing:
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              timeout: 30s
+              parameters:
+                - name: node
+                  value: '{#NODE.NAME}'
+                - name: port
+                  value: '{$PVE.URL.PORT}'
+                - name: token
+                  value: '{$PVE.TOKEN.SECRET}'
+                - name: token_id
+                  value: '{$PVE.TOKEN.ID}'
+                - name: url
+                  value: '{$PVE.URL.HOST}'
+              tags:
+                - tag: component
+                  value: disk
+                - tag: node
+                  value: '{#NODE.NAME}'
           trigger_prototypes:
+            - uuid: a38ce34c9139494f9e8b3d3fc31707df
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) < now() + {$PVE.CERT.EXPIRY.WARN} and last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) > 0'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: Certificate expiring soon'
+              event_name: 'Proxmox VE: Node [{#NODE.NAME}]: Certificate "{ITEM.LASTVALUE2}" expiring soon'
+              opdata: 'Soonest expiry: {ITEM.LASTVALUE1}'
+              priority: WARNING
+              description: 'A certificate on the node {#NODE.NAME} is expiring within the warning threshold.'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: 4719be1d32a44a0dbb564f82dfe7b632
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) < now() and last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) > 0'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: Certificate expired'
+              opdata: 'Expired at: {ITEM.LASTVALUE1}'
+              priority: AVERAGE
+              description: 'A certificate on the node {#NODE.NAME} has expired.'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: 41c53738e20b4f58ba4e6e6b834d1885
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.disk.smart[{#NODE.NAME}]) <> 1'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: SMART status fail'
+              priority: HIGH
+              description: 'One or more disks on the node {#NODE.NAME} have a SMART health failure.'
+              tags:
+                - tag: scope
+                  value: availability
             - uuid: a0445b4e1ffd451595ecea0468b4a6a6
               expression: 'min(/Proxmox VE by HTTP/proxmox.node.memused[{#NODE.NAME}],5m) / last(/Proxmox VE by HTTP/proxmox.node.memtotal[{#NODE.NAME}]) * 100 >{$PVE.MEMORY.PUSE.MAX.WARN:"{#NODE.NAME}"}'
               name: 'Proxmox VE: Node [{#NODE.NAME}] high memory usage'
@@ -1364,9 +1905,6 @@ zabbix_export:
                 value: '{$PVE.VM.TAGS.NOT_MATCHES}'
                 operator: NOT_MATCHES_REGEX
                 formulaid: B
-              - macro: '{#QEMU.TAGS}'
-                operator: DOES_NOT_EXIST
-                formulaid: C
           item_prototypes:
             - uuid: 196bf027d77742ea8960e350d9ea579e
               name: 'VM [{#NODE.NAME}/{#QEMU.NAME} ({#QEMU.ID})]: CPU usage'
@@ -1686,7 +2224,7 @@ zabbix_export:
                   manual_close: 'YES'
                   dependencies:
                     - name: 'Proxmox VE: VM [{#NODE.NAME}/{#QEMU.NAME} ({#QEMU.ID})]: Not running'
-                      expression: 'last(/Proxmox VE by HTTP/proxmox.qemu.vmstatus[{#QEMU.ID}])<>"running"'
+                      expression: 'last(/Proxmox VE by HTTP/proxmox.qemu.vmstatus[{#QEMU.ID}])<>"running" and last(/Proxmox VE by HTTP/proxmox.qemu.onboot[{#QEMU.ID}])=1'
                   tags:
                     - tag: scope
                       value: notice
@@ -1945,6 +2483,9 @@ zabbix_export:
         - tag: target
           value: proxmox
       macros:
+        - macro: '{$PVE.CERT.EXPIRY.WARN}'
+          value: '2592000'
+          description: 'Certificate expiry warning threshold in seconds (default 30 days).'
         - macro: '{$PVE.CPU.PUSE.MAX.WARN}'
           value: '90'
           description: 'Maximum used CPU in percentage.'
@@ -2001,6 +2542,13 @@ zabbix_export:
               newvalue: 'Yes'
             - value: '0'
               newvalue: 'No'
+        - uuid: 3867f5adb2dc4ae98476c39edacd9e0a
+          name: 'Disk SMART status'
+          mappings:
+            - value: '1'
+              newvalue: Healthy
+            - value: '0'
+              newvalue: Unhealthy
         - uuid: 87034fae192c44dba6c8bb568cd90bbd
           name: 'HTTP response status code'
           mappings:

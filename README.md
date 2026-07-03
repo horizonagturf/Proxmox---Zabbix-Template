@@ -51,6 +51,7 @@ Please provide the necessary access levels for both the User and the Token:
 - Guests tagged `do_not_monitor` are excluded from QEMU and LXC discovery.
 - Guests with `Start at boot` disabled (`onboot=0`) remain discovered, but the `Not running` and `has been restarted` alerts are suppressed.
 - Tag-based exclusion depends on Proxmox exposing guest `tags` in `/cluster/resources`.
+- The SMART health check skips drives that report `UNKNOWN` or have no health data (e.g. drives behind hardware RAID controllers, NVMe drives with non-standard health reporting, or virtual/passthrough disks that lack SMART support). Only an explicit failure triggers an alert.
 
 ### Macros used
 
@@ -60,6 +61,7 @@ Please provide the necessary access levels for both the User and the Token:
 |{$PVE.URL.PORT}|<p>The API uses the HTTPS protocol and the server listens to port 8006 by default.</p>|`8006`|
 |{$PVE.TOKEN.ID}|<p>API tokens allow stateless access to most parts of the REST API by another system, software or API client.</p>|`USER@REALM!TOKENID`|
 |{$PVE.TOKEN.SECRET}|<p>Secret key.</p>|`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`|
+|{$PVE.CERT.EXPIRY.WARN}|<p>Certificate expiry warning threshold in seconds (default 30 days).</p>|`2592000`|
 |{$PVE.ROOT.PUSE.MAX.WARN}|<p>Maximum used root space in percentage.</p>|`90`|
 |{$PVE.MEMORY.PUSE.MAX.WARN}|<p>Maximum used memory in percentage.</p>|`90`|
 |{$PVE.CPU.PUSE.MAX.WARN}|<p>Maximum used CPU in percentage.</p>|`90`|
@@ -69,9 +71,9 @@ Please provide the necessary access levels for both the User and the Token:
 |{$PVE.LXC.MEMORY.PUSE.MAX.WARN}|<p>Maximum used memory in percentage.</p>|`90`|
 |{$PVE.LXC.CPU.PUSE.MAX.WARN}|<p>Maximum used CPU in percentage.</p>|`90`|
 |{$PVE.LXC.DISK.PUSE.MAX.WARN}|<p>Maximum used disk in percentage.</p>|`90`|
-|{$PVE.LXC.TAGS.NOT_MATCHES}|<p>Exclude LXC containers whose Proxmox tags contain `do_not_monitor`.</p>|`(^|[;,])do_not_monitor($|[;,])`|
+|{$PVE.LXC.TAGS.NOT_MATCHES}|<p>Exclude LXC containers whose Proxmox tags contain `do_not_monitor`.</p>|`(^&#124;[;,])do_not_monitor($&#124;[;,])`|
 |{$PVE.STORAGE.PUSE.MAX.WARN}|<p>Maximum used storage space in percentage.</p>|`90`|
-|{$PVE.VM.TAGS.NOT_MATCHES}|<p>Exclude virtual machines whose Proxmox tags contain `do_not_monitor`.</p>|`(^|[;,])do_not_monitor($|[;,])`|
+|{$PVE.VM.TAGS.NOT_MATCHES}|<p>Exclude virtual machines whose Proxmox tags contain `do_not_monitor`.</p>|`(^&#124;[;,])do_not_monitor($&#124;[;,])`|
 
 ### Items
 
@@ -80,6 +82,17 @@ Please provide the necessary access levels for both the User and the Token:
 |Get cluster resources|<p>Resources index.</p>|HTTP agent|proxmox.cluster.resources<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Set value to: `Error getting data`</p></li></ul>|
 |Get cluster status|<p>Get cluster status information.</p>|HTTP agent|proxmox.cluster.status<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Set value to: `Error getting data`</p></li></ul>|
 |API service status|<p>Get API service status.</p>|Script|proxmox.api.available<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `12h`</p></li></ul>|
+|Cluster: Nodes online|<p>Number of online nodes in the cluster.</p>|Dependent item|proxmox.cluster.nodes.online|
+|Cluster: Nodes offline|<p>Number of offline nodes in the cluster.</p>|Dependent item|proxmox.cluster.nodes.offline|
+|Cluster: CPU total|<p>Total number of CPUs across all nodes.</p>|Dependent item|proxmox.cluster.cpu.total|
+|Cluster: CPU utilization|<p>Average CPU utilization across all online nodes.</p>|Dependent item|proxmox.cluster.cpu.utilization|
+|Cluster: Memory total|<p>Total memory across all nodes.</p>|Dependent item|proxmox.cluster.memory.total|
+|Cluster: Memory used|<p>Total memory used across all nodes.</p>|Dependent item|proxmox.cluster.memory.used|
+|Cluster: Memory utilization|<p>Memory utilization percentage across the cluster.</p>|Dependent item|proxmox.cluster.memory.utilization|
+|Cluster: VMs running|<p>Number of running QEMU virtual machines.</p>|Dependent item|proxmox.cluster.vms.running|
+|Cluster: VMs stopped|<p>Number of stopped QEMU virtual machines.</p>|Dependent item|proxmox.cluster.vms.stopped|
+|Cluster: LXCs running|<p>Number of running LXC containers.</p>|Dependent item|proxmox.cluster.lxcs.running|
+|Cluster: LXCs stopped|<p>Number of stopped LXC containers.</p>|Dependent item|proxmox.cluster.lxcs.stopped|
 
 ### Triggers
 
@@ -136,6 +149,13 @@ Please provide the necessary access levels for both the User and the Token:
 |Node [{#NODE.NAME}]: Time zone|<p>Time zone.</p>|Dependent item|proxmox.node.timezone[{#NODE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data.timezone`</p></li><li><p>Discard unchanged with heartbeat: `12h`</p></li></ul>|
 |Node [{#NODE.NAME}]: Localtime|<p>Seconds since 1970-01-01 00:00:00 (local time).</p>|Dependent item|proxmox.node.localtime[{#NODE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data.localtime`</p></li></ul>|
 |Node [{#NODE.NAME}]: Time|<p>Seconds since 1970-01-01 00:00:00 UTC.</p>|Dependent item|proxmox.node.utctime[{#NODE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data.time`</p></li></ul>|
+|Node [{#NODE.NAME}]: Get certificates|<p>Retrieves certificate information from the node.</p>|HTTP agent|proxmox.node.certs.get[{#NODE.NAME}]|
+|Node [{#NODE.NAME}]: Certificate count|<p>Total number of certificates on the node.</p>|Dependent item|proxmox.node.cert.count[{#NODE.NAME}]|
+|Node [{#NODE.NAME}]: Certificate soonest expiry|<p>Earliest notafter value across all certificates on the node.</p>|Dependent item|proxmox.node.cert.notafter.soonest[{#NODE.NAME}]|
+|Node [{#NODE.NAME}]: Get disks|<p>Retrieves the list of physical disks from the node.</p>|HTTP agent|proxmox.node.disks.get[{#NODE.NAME}]|
+|Node [{#NODE.NAME}]: Disk count|<p>Total number of physical disks on the node.</p>|Dependent item|proxmox.node.disk.count[{#NODE.NAME}]|
+|Node [{#NODE.NAME}]: Disk inventory|<p>Summary of all physical disks (devpath, model, serial, type, vendor).</p>|Dependent item|proxmox.node.disk.inventory[{#NODE.NAME}]|
+|Node [{#NODE.NAME}]: SMART status|<p>Checks SMART health for all disks. Returns 1 if all healthy, 0 if any failure.</p>|Script|proxmox.node.disk.smart[{#NODE.NAME}]|
 
 ### Trigger prototypes for Node discovery
 
@@ -149,6 +169,9 @@ Please provide the necessary access levels for both the User and the Token:
 |Proxmox VE: Node [{#NODE.NAME}] high memory usage|<p>Memory usage.</p>|`min(/Proxmox VE by HTTP/proxmox.node.memused[{#NODE.NAME}],5m) / last(/Proxmox VE by HTTP/proxmox.node.memtotal[{#NODE.NAME}]) * 100 >{$PVE.MEMORY.PUSE.MAX.WARN:"{#NODE.NAME}"}`|Warning||
 |Proxmox VE: Node [{#NODE.NAME}] high CPU usage|<p>CPU usage.</p>|`min(/Proxmox VE by HTTP/proxmox.node.cpu[{#NODE.NAME}],5m) > {$PVE.CPU.PUSE.MAX.WARN:"{#NODE.NAME}"}`|Warning||
 |Proxmox VE: Node [{#NODE.NAME}] high swap space usage|<p>If there is no swap configured, this trigger is ignored.</p>|`min(/Proxmox VE by HTTP/proxmox.node.swapused[{#NODE.NAME}],5m) / last(/Proxmox VE by HTTP/proxmox.node.swaptotal[{#NODE.NAME}]) * 100 > {$PVE.SWAP.PUSE.MAX.WARN:"{#NODE.NAME}"} and last(/Proxmox VE by HTTP/proxmox.node.swaptotal[{#NODE.NAME}]) > 0`|Warning||
+|Proxmox VE: Node [{#NODE.NAME}]: Certificate expiring soon|<p>A certificate on the node is expiring within the warning threshold.</p>|`last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) < now() + {$PVE.CERT.EXPIRY.WARN} and last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) > 0`|Warning||
+|Proxmox VE: Node [{#NODE.NAME}]: Certificate expired|<p>A certificate on the node has expired.</p>|`last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) < now() and last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) > 0`|Average||
+|Proxmox VE: Node [{#NODE.NAME}]: SMART status fail|<p>One or more disks on the node have a SMART health failure.</p>|`last(/Proxmox VE by HTTP/proxmox.node.disk.smart[{#NODE.NAME}]) <> 1`|High||
 
 ### LLD rule Storage discovery
 
@@ -247,4 +270,3 @@ If a problem is reproducible with the unmodified upstream template, you can also
 ## License
 
 The original template content comes from the Zabbix project and remains subject to the upstream `AGPL-3.0-only` license. Modifications in this repository are distributed under the same license unless stated otherwise.
-
