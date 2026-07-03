@@ -25,11 +25,24 @@ zabbix_export:
         * Check: ["perm","/storage",["Datastore.Audit"]]
         * Check: ["perm","/vms",["VM.Audit"]]
         
+        The following cluster-level API paths are also accessed:
+        
+        * /cluster/backup-info/not-backed-up
+        * /cluster/ha/status/current (if HA is configured)
+        * /cluster/ha/resources (if HA is configured)
+        * /cluster/ceph/status (if Ceph is configured)
+        
         The following API paths are accessed per node (covered by Sys.Audit on /):
         
         * /nodes/{node}/certificates/info
         * /nodes/{node}/disks/list
         * /nodes/{node}/disks/smart?disk={disk}
+        * /nodes/{node}/disks/zfs
+        * /nodes/{node}/replication
+        * /nodes/{node}/replication/{id}/status
+        * /nodes/{node}/subscription
+        * /nodes/{node}/apt/update
+        * /nodes/{node}/tasks
         
         2. Copy the resulting Token ID and Secret into the host macros '{$PVE.TOKEN.ID}' and '{$PVE.TOKEN.SECRET}'.
         
@@ -424,6 +437,446 @@ zabbix_export:
           tags:
             - tag: component
               value: cluster
+        - uuid: 9bcb3e3472f24bc5b824cc63c45a1c4c
+          name: 'Get guests not backed up'
+          type: HTTP_AGENT
+          key: proxmox.backup.notbackedup.get
+          delay: 1h
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          description: 'Returns a list of guests not covered by any backup job.'
+          preprocessing:
+            - type: CHECK_NOT_SUPPORTED
+              parameters:
+                - '-1'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '{"data":[]}'
+          url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/cluster/backup-info/not-backed-up'
+          headers:
+            - name: Authorization
+              value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 38d0651ee23e4cc488e5eb2af234c025
+          name: 'Backup: Guests not backed up count'
+          type: DEPENDENT
+          key: proxmox.backup.notbackedup.count
+          delay: '0'
+          description: 'Number of guests not covered by any backup job.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  return data ? data.length : 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          master_item:
+            key: proxmox.backup.notbackedup.get
+          tags:
+            - tag: component
+              value: backup
+          triggers:
+            - uuid: 55c267bebb884540a7c136b55efdf867
+              expression: 'last(/Proxmox VE by HTTP/proxmox.backup.notbackedup.count) > {$PVE.BACKUP.NOTBACKEDUP.WARN}'
+              name: 'Proxmox VE: Guests not covered by backup'
+              event_name: 'Proxmox VE: {ITEM.LASTVALUE1} guest(s) not covered by any backup job'
+              priority: WARNING
+              description: 'There are guests in the cluster that are not included in any backup job.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: b8428ea806f648a8aa711af496fd785e
+          name: 'Backup: Guests not backed up list'
+          type: DEPENDENT
+          key: proxmox.backup.notbackedup.list
+          delay: '0'
+          value_type: TEXT
+          description: 'Comma-separated list of guest names/IDs not covered by any backup job.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || data.length === 0) return 'None';
+                  return data.map(function(g) {
+                    return g.type + ':' + g.vmid + (g.name ? ' (' + g.name + ')' : '');
+                  }).join(', ');
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          master_item:
+            key: proxmox.backup.notbackedup.get
+          tags:
+            - tag: component
+              value: backup
+        - uuid: e6f6c74a108743b48f9152dc7406c05c
+          name: 'Get HA status'
+          type: HTTP_AGENT
+          key: proxmox.ha.status.get
+          delay: 1m
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          description: 'Get HA manager status including quorum, master, and LRM info.'
+          preprocessing:
+            - type: CHECK_NOT_SUPPORTED
+              parameters:
+                - '-1'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '{"data":[]}'
+          url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/cluster/ha/status/current'
+          headers:
+            - name: Authorization
+              value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: 9d360d65f7984ea0b62b32a39acc635b
+          name: 'Get HA resources'
+          type: HTTP_AGENT
+          key: proxmox.ha.resources.get
+          delay: 5m
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          description: 'Get list of all HA-managed resources and their states.'
+          preprocessing:
+            - type: CHECK_NOT_SUPPORTED
+              parameters:
+                - '-1'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '{"data":[]}'
+          url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/cluster/ha/resources'
+          headers:
+            - name: Authorization
+              value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: c0dc284fecd246c7876a3b80b25fc6ff
+          name: 'HA: Quorum'
+          type: DEPENDENT
+          key: proxmox.ha.quorum
+          delay: '0'
+          description: 'Whether the HA cluster currently has quorum.'
+          valuemap:
+            name: 'HA quorate'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || data.length === 0) return '';
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'quorum') return data[i].quorate ? 1 : 0;
+                  }
+                  return '';
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ha.status.get
+          tags:
+            - tag: component
+              value: ha
+          triggers:
+            - uuid: 3f30a1b17441487d890b6fc8c18427e3
+              expression: 'last(/Proxmox VE by HTTP/proxmox.ha.quorum) = 0'
+              name: 'Proxmox VE: HA quorum lost'
+              priority: DISASTER
+              description: 'The HA cluster has lost quorum. HA services cannot be managed.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 7a5bf5e6cbdb438f978231e5558a0cd7
+          name: 'HA: Master node'
+          type: DEPENDENT
+          key: proxmox.ha.master.node
+          delay: '0'
+          value_type: TEXT
+          description: 'The node currently acting as HA CRM master.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || data.length === 0) return '';
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'master') return data[i].node;
+                  }
+                  return '';
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ha.status.get
+          tags:
+            - tag: component
+              value: ha
+        - uuid: 23472f8c85c644fd93d96dadd10f3c86
+          name: 'HA: Resources total'
+          type: DEPENDENT
+          key: proxmox.ha.resources.total
+          delay: '0'
+          description: 'Total number of HA-managed resources.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  return data ? data.length : 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ha.resources.get
+          tags:
+            - tag: component
+              value: ha
+        - uuid: bd32a6ee57a94a0d9b3822e9f8f7a65c
+          name: 'HA: Resources in error state'
+          type: DEPENDENT
+          key: proxmox.ha.resources.error
+          delay: '0'
+          description: 'Number of HA-managed resources currently in error state.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data) return 0;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].state === 'error') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ha.resources.get
+          tags:
+            - tag: component
+              value: ha
+          triggers:
+            - uuid: 6a36e86baa0146cba7216fbe8bd683f1
+              expression: 'last(/Proxmox VE by HTTP/proxmox.ha.resources.error) > 0'
+              name: 'Proxmox VE: HA resource(s) in error state'
+              event_name: 'Proxmox VE: {ITEM.LASTVALUE1} HA resource(s) in error state'
+              priority: HIGH
+              description: 'One or more HA-managed resources are in an error state and need manual intervention.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 2e71fff2ff684994988755b75b2db5d2
+          name: 'HA: Resources started'
+          type: DEPENDENT
+          key: proxmox.ha.resources.started
+          delay: '0'
+          description: 'Number of HA-managed resources in started state.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data) return 0;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].state === 'started') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ha.resources.get
+          tags:
+            - tag: component
+              value: ha
+        - uuid: 7e4dab45983c4d3f8da268c3d5a3d9d4
+          name: 'HA: Resources stopped'
+          type: DEPENDENT
+          key: proxmox.ha.resources.stopped
+          delay: '0'
+          description: 'Number of HA-managed resources in stopped state.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data) return 0;
+                  var count = 0;
+                  for (var i = 0; i < data.length; i++) {
+                    if (data[i].state === 'stopped') count++;
+                  }
+                  return count;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ha.resources.get
+          tags:
+            - tag: component
+              value: ha
+        - uuid: 5caa2d3666ab4f1780a8f287b32f32d4
+          name: 'Get Ceph status'
+          type: HTTP_AGENT
+          key: proxmox.ceph.status.get
+          delay: 1m
+          history: '0'
+          value_type: TEXT
+          trends: '0'
+          description: 'Get Ceph cluster status including health, OSDs, and monitors.'
+          preprocessing:
+            - type: CHECK_NOT_SUPPORTED
+              parameters:
+                - '-1'
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '{"data":{}}'
+          url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/cluster/ceph/status'
+          headers:
+            - name: Authorization
+              value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+          tags:
+            - tag: component
+              value: raw
+        - uuid: cc2970d09795483689e04170e14ba59a
+          name: 'Ceph: Health status'
+          type: DEPENDENT
+          key: proxmox.ceph.health
+          delay: '0'
+          value_type: TEXT
+          description: 'Ceph cluster health status (HEALTH_OK, HEALTH_WARN, HEALTH_ERR).'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || !data.health) return '';
+                  return data.health.status || '';
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ceph.status.get
+          tags:
+            - tag: component
+              value: ceph
+          triggers:
+            - uuid: f45d3f85448f4d74968fef6634c20b89
+              expression: 'last(/Proxmox VE by HTTP/proxmox.ceph.health) = "HEALTH_WARN"'
+              name: 'Proxmox VE: Ceph health WARN'
+              priority: WARNING
+              description: 'Ceph cluster is reporting a warning health status.'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: dcedf47f3c5d4e5babca8fe08513cf2e
+              expression: 'last(/Proxmox VE by HTTP/proxmox.ceph.health) = "HEALTH_ERR"'
+              name: 'Proxmox VE: Ceph health ERR'
+              priority: HIGH
+              description: 'Ceph cluster is reporting an error health status.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 21395aaccbe64ec18d6ff15cbae6451a
+          name: 'Ceph: OSDs total'
+          type: DEPENDENT
+          key: proxmox.ceph.osd.total
+          delay: '0'
+          description: 'Total number of Ceph OSDs in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || !data.osdmap || !data.osdmap.osdmap) return 0;
+                  return data.osdmap.osdmap.num_osds || 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ceph.status.get
+          tags:
+            - tag: component
+              value: ceph
+        - uuid: 7b023578395c474885e49ac2bc4be93a
+          name: 'Ceph: OSDs up'
+          type: DEPENDENT
+          key: proxmox.ceph.osd.up
+          delay: '0'
+          description: 'Number of Ceph OSDs currently up.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || !data.osdmap || !data.osdmap.osdmap) return 0;
+                  return data.osdmap.osdmap.num_up_osds || 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ceph.status.get
+          tags:
+            - tag: component
+              value: ceph
+          triggers:
+            - uuid: 8cfea38028ff41e7b90d40fa5dcadae7
+              expression: 'last(/Proxmox VE by HTTP/proxmox.ceph.osd.up) < last(/Proxmox VE by HTTP/proxmox.ceph.osd.total) and last(/Proxmox VE by HTTP/proxmox.ceph.osd.total) > 0'
+              name: 'Proxmox VE: Ceph OSD(s) down'
+              event_name: 'Proxmox VE: Ceph OSD(s) down ({ITEM.LASTVALUE1} of {ITEM.LASTVALUE2} up)'
+              priority: AVERAGE
+              description: 'One or more Ceph OSDs are not running.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 06b9c16495a943b0aa6e3f4032b3704c
+          name: 'Ceph: OSDs in'
+          type: DEPENDENT
+          key: proxmox.ceph.osd.in
+          delay: '0'
+          description: 'Number of Ceph OSDs currently marked in.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || !data.osdmap || !data.osdmap.osdmap) return 0;
+                  return data.osdmap.osdmap.num_in_osds || 0;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ceph.status.get
+          tags:
+            - tag: component
+              value: ceph
+        - uuid: 2123a7c314184213bfca4b5e53418e14
+          name: 'Ceph: Monitors'
+          type: DEPENDENT
+          key: proxmox.ceph.mon.count
+          delay: '0'
+          description: 'Number of Ceph monitors in the cluster.'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value).data;
+                  if (!data || !data.monmap || !data.monmap.mons) return 0;
+                  return data.monmap.mons.length;
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 10m
+          master_item:
+            key: proxmox.ceph.status.get
+          tags:
+            - tag: component
+              value: ceph
       discovery_rules:
         - uuid: e01bb8d7614144ba82e31d91618dee31
           name: 'Cluster discovery'
@@ -1748,6 +2201,423 @@ zabbix_export:
                   value: disk
                 - tag: node
                   value: '{#NODE.NAME}'
+            - uuid: dec383949ef34b308a37eb3cc456f498
+              name: 'Node [{#NODE.NAME}]: Replication status'
+              type: SCRIPT
+              key: 'proxmox.node.replication.get[{#NODE.NAME}]'
+              delay: 5m
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Checks replication job status for all jobs on node {#NODE.NAME}. Returns aggregated JSON with job count, error count, max lag, and error details.'
+              params: |
+                var params = JSON.parse(value);
+                var req = new HttpRequest();
+                req.addHeader('Authorization: PVEAPIToken=' + params.token_id + '=' + params.token);
+                var base = 'https://' + params.url + ':' + params.port + '/api2/json';
+                var result = {jobs: 0, errors: 0, max_lag_seconds: 0, error_details: ''};
+
+                var jobsResp = req.get(base + '/nodes/' + params.node + '/replication');
+                if (req.getStatus() !== 200) return JSON.stringify(result);
+
+                var jobs = JSON.parse(jobsResp).data;
+                if (!jobs || jobs.length === 0) return JSON.stringify(result);
+                result.jobs = jobs.length;
+
+                var errorList = [];
+                var now = Math.floor(Date.now() / 1000);
+                for (var i = 0; i < jobs.length; i++) {
+                  try {
+                    var statusResp = req.get(base + '/nodes/' + params.node + '/replication/' + jobs[i].id + '/status');
+                    if (req.getStatus() === 200) {
+                      var st = JSON.parse(statusResp).data;
+                      if (st.fail_count && st.fail_count > 0) {
+                        result.errors++;
+                        errorList.push(jobs[i].id + ': ' + (st.error || 'unknown'));
+                      }
+                      if (st.last_sync) {
+                        var lag = now - st.last_sync;
+                        if (lag > result.max_lag_seconds) result.max_lag_seconds = lag;
+                      }
+                    }
+                  } catch (e) {}
+                }
+                result.error_details = errorList.join('; ');
+                return JSON.stringify(result);
+              timeout: 30s
+              parameters:
+                - name: node
+                  value: '{#NODE.NAME}'
+                - name: port
+                  value: '{$PVE.URL.PORT}'
+                - name: token
+                  value: '{$PVE.TOKEN.SECRET}'
+                - name: token_id
+                  value: '{$PVE.TOKEN.ID}'
+                - name: url
+                  value: '{$PVE.URL.HOST}'
+              tags:
+                - tag: component
+                  value: replication
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: c0d7a2237c95403d91e80a226e09b2f4
+              name: 'Node [{#NODE.NAME}]: Replication jobs'
+              type: DEPENDENT
+              key: 'proxmox.node.replication.jobs[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Number of replication jobs configured on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.jobs
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              master_item:
+                key: 'proxmox.node.replication.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: replication
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 7da89d5ec74c4d65ae7869a54bdfe049
+              name: 'Node [{#NODE.NAME}]: Replication errors'
+              type: DEPENDENT
+              key: 'proxmox.node.replication.errors[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Number of replication jobs with errors on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.errors
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 10m
+              master_item:
+                key: 'proxmox.node.replication.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: replication
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 96cb348492414901ad3d2e2deb4e7019
+              name: 'Node [{#NODE.NAME}]: Replication max lag'
+              type: DEPENDENT
+              key: 'proxmox.node.replication.lag[{#NODE.NAME}]'
+              delay: '0'
+              units: s
+              description: 'Maximum replication lag in seconds across all jobs on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.max_lag_seconds
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 10m
+              master_item:
+                key: 'proxmox.node.replication.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: replication
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 97dafe3bdc484f7394ad52fc54630cc7
+              name: 'Node [{#NODE.NAME}]: Get ZFS pools'
+              type: HTTP_AGENT
+              key: 'proxmox.node.zfs.get[{#NODE.NAME}]'
+              delay: 5m
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Get list of ZFS pools on node {#NODE.NAME}.'
+              preprocessing:
+                - type: CHECK_NOT_SUPPORTED
+                  parameters:
+                    - '-1'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '{"data":[]}'
+              url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/disks/zfs'
+              headers:
+                - name: Authorization
+                  value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+              tags:
+                - tag: component
+                  value: zfs
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 4c6b3ecdfb064e84beebeffad25e475f
+              name: 'Node [{#NODE.NAME}]: ZFS pool count'
+              type: DEPENDENT
+              key: 'proxmox.node.zfs.pool.count[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Total number of ZFS pools on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      return data ? data.length : 0;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              master_item:
+                key: 'proxmox.node.zfs.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: zfs
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: cd99219c22a64a4cb3b75aef3058ad2d
+              name: 'Node [{#NODE.NAME}]: ZFS pools unhealthy'
+              type: DEPENDENT
+              key: 'proxmox.node.zfs.pool.unhealthy[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Number of ZFS pools not in ONLINE state on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      if (!data) return 0;
+                      var count = 0;
+                      for (var i = 0; i < data.length; i++) {
+                        if (data[i].health !== 'ONLINE') count++;
+                      }
+                      return count;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 10m
+              master_item:
+                key: 'proxmox.node.zfs.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: zfs
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 63b55270b2b34d6b9a7db9d74a3b15ee
+              name: 'Node [{#NODE.NAME}]: ZFS pools unhealthy names'
+              type: DEPENDENT
+              key: 'proxmox.node.zfs.pool.unhealthy.names[{#NODE.NAME}]'
+              delay: '0'
+              value_type: TEXT
+              description: 'Comma-separated names of ZFS pools not in ONLINE state on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      if (!data) return 'None';
+                      var names = [];
+                      for (var i = 0; i < data.length; i++) {
+                        if (data[i].health !== 'ONLINE') names.push(data[i].name + ' (' + data[i].health + ')');
+                      }
+                      return names.length > 0 ? names.join(', ') : 'None';
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 10m
+              master_item:
+                key: 'proxmox.node.zfs.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: zfs
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: be2a9724b95d4dd9bce79adac3344f47
+              name: 'Node [{#NODE.NAME}]: Get subscription'
+              type: HTTP_AGENT
+              key: 'proxmox.node.subscription.get[{#NODE.NAME}]'
+              delay: 12h
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Get subscription status for node {#NODE.NAME}.'
+              preprocessing:
+                - type: CHECK_NOT_SUPPORTED
+                  parameters:
+                    - '-1'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '{"data":{}}'
+              url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/subscription'
+              headers:
+                - name: Authorization
+                  value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+              tags:
+                - tag: component
+                  value: subscription
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 5c79d039df4b452e9bcf0ff765fe4f1d
+              name: 'Node [{#NODE.NAME}]: Subscription status'
+              type: DEPENDENT
+              key: 'proxmox.node.subscription.status[{#NODE.NAME}]'
+              delay: '0'
+              value_type: TEXT
+              description: 'Subscription status for node {#NODE.NAME} (active, expired, invalid, new, notfound, suspended).'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      if (!data || !data.status) return 'unknown';
+                      return data.status;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.subscription.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: subscription
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: e4ff4168ebd44d7fa004b966ffd81caf
+              name: 'Node [{#NODE.NAME}]: Subscription due date'
+              type: DEPENDENT
+              key: 'proxmox.node.subscription.duedate[{#NODE.NAME}]'
+              delay: '0'
+              value_type: TEXT
+              description: 'Next due date for subscription on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      if (!data || !data.nextduedate) return 'N/A';
+                      return data.nextduedate;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.subscription.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: subscription
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 60518c1e7b7a427587d2cc5e19cf3531
+              name: 'Node [{#NODE.NAME}]: Get pending updates'
+              type: HTTP_AGENT
+              key: 'proxmox.node.apt.updates.get[{#NODE.NAME}]'
+              delay: 12h
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Get list of available package updates on node {#NODE.NAME}. Returns cached apt data.'
+              preprocessing:
+                - type: CHECK_NOT_SUPPORTED
+                  parameters:
+                    - '-1'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '{"data":[]}'
+              url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/apt/update'
+              headers:
+                - name: Authorization
+                  value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+              tags:
+                - tag: component
+                  value: updates
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 6ea604d1d50b4ec792c7361cb1fdb2b6
+              name: 'Node [{#NODE.NAME}]: Pending updates count'
+              type: DEPENDENT
+              key: 'proxmox.node.apt.updates.count[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Number of pending package updates on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      return data ? data.length : 0;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 12h
+              master_item:
+                key: 'proxmox.node.apt.updates.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: updates
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: 0981e523b7724b6192c422a6c8a0ed71
+              name: 'Node [{#NODE.NAME}]: Get failed tasks'
+              type: HTTP_AGENT
+              key: 'proxmox.node.tasks.failed.get[{#NODE.NAME}]'
+              delay: 10m
+              history: '0'
+              value_type: TEXT
+              trends: '0'
+              description: 'Get recent failed tasks on node {#NODE.NAME}.'
+              preprocessing:
+                - type: CHECK_NOT_SUPPORTED
+                  parameters:
+                    - '-1'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '{"data":[]}'
+              url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/tasks?errors=1&limit=50'
+              headers:
+                - name: Authorization
+                  value: 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'
+              tags:
+                - tag: component
+                  value: tasks
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: bb667c6ee1394300940697ba7a651f9e
+              name: 'Node [{#NODE.NAME}]: Failed tasks in 24h'
+              type: DEPENDENT
+              key: 'proxmox.node.tasks.failed.count24h[{#NODE.NAME}]'
+              delay: '0'
+              description: 'Number of failed tasks in the last 24 hours on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      if (!data) return 0;
+                      var cutoff = Math.floor(Date.now() / 1000) - 86400;
+                      var count = 0;
+                      for (var i = 0; i < data.length; i++) {
+                        if (data[i].starttime && data[i].starttime >= cutoff) count++;
+                      }
+                      return count;
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 10m
+              master_item:
+                key: 'proxmox.node.tasks.failed.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: tasks
+                - tag: node
+                  value: '{#NODE.NAME}'
+            - uuid: fb65da947cb8448d9af8ec602bc1d3f4
+              name: 'Node [{#NODE.NAME}]: Latest failed task'
+              type: DEPENDENT
+              key: 'proxmox.node.tasks.failed.latest[{#NODE.NAME}]'
+              delay: '0'
+              value_type: TEXT
+              description: 'Most recent failed task type and exit status on node {#NODE.NAME}.'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value).data;
+                      if (!data || data.length === 0) return 'None';
+                      var t = data[0];
+                      return t.type + (t.id ? ':' + t.id : '') + ' - ' + (t.status || t.exitstatus || 'error');
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 10m
+              master_item:
+                key: 'proxmox.node.tasks.failed.get[{#NODE.NAME}]'
+              tags:
+                - tag: component
+                  value: tasks
+                - tag: node
+                  value: '{#NODE.NAME}'
           trigger_prototypes:
             - uuid: a38ce34c9139494f9e8b3d3fc31707df
               expression: 'last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) < now() + {$PVE.CERT.EXPIRY.WARN} and last(/Proxmox VE by HTTP/proxmox.node.cert.notafter.soonest[{#NODE.NAME}]) > 0'
@@ -1773,6 +2643,51 @@ zabbix_export:
               name: 'Proxmox VE: Node [{#NODE.NAME}]: SMART status fail'
               priority: HIGH
               description: 'One or more disks on the node {#NODE.NAME} have a SMART health failure.'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: 9b566c1914b146dea755d48ed0c51c64
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.replication.errors[{#NODE.NAME}]) > 0'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: Replication error'
+              event_name: 'Proxmox VE: Node [{#NODE.NAME}]: {ITEM.LASTVALUE1} replication job(s) with errors'
+              priority: HIGH
+              description: 'One or more replication jobs on node {#NODE.NAME} have errors.'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: b2bbb535afd346fdba9bdd709f4253b6
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.zfs.pool.unhealthy[{#NODE.NAME}]) > 0'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: ZFS pool degraded'
+              event_name: 'Proxmox VE: Node [{#NODE.NAME}]: {ITEM.LASTVALUE1} ZFS pool(s) not ONLINE'
+              priority: HIGH
+              description: 'One or more ZFS pools on node {#NODE.NAME} are in a degraded or faulted state.'
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: 2274b192390e4cd2ba00cdd0b90e70b6
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}]) <> "active" and length(last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}])) > 0 and last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}]) <> "unknown"'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: Subscription not active'
+              event_name: 'Proxmox VE: Node [{#NODE.NAME}]: Subscription status is {ITEM.LASTVALUE1}'
+              priority: INFO
+              description: 'The subscription on node {#NODE.NAME} is not active.'
+              tags:
+                - tag: scope
+                  value: notice
+            - uuid: 00a63bad38b94767aee3433c5c37610d
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.apt.updates.count[{#NODE.NAME}]) > {$PVE.APT.UPDATES.WARN}'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: Many pending updates'
+              event_name: 'Proxmox VE: Node [{#NODE.NAME}]: {ITEM.LASTVALUE1} pending package updates'
+              priority: INFO
+              description: 'Node {#NODE.NAME} has a high number of pending package updates.'
+              tags:
+                - tag: scope
+                  value: notice
+            - uuid: a5169b311ada4cf5a701ff29b765d407
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.tasks.failed.count24h[{#NODE.NAME}]) > 0'
+              name: 'Proxmox VE: Node [{#NODE.NAME}]: Failed tasks in last 24h'
+              event_name: 'Proxmox VE: Node [{#NODE.NAME}]: {ITEM.LASTVALUE1} failed task(s) in last 24h'
+              priority: AVERAGE
+              description: 'There are failed tasks on node {#NODE.NAME} in the last 24 hours.'
               tags:
                 - tag: scope
                   value: availability
@@ -2483,6 +3398,12 @@ zabbix_export:
         - tag: target
           value: proxmox
       macros:
+        - macro: '{$PVE.APT.UPDATES.WARN}'
+          value: '50'
+          description: 'Alert threshold for number of pending package updates per node.'
+        - macro: '{$PVE.BACKUP.NOTBACKEDUP.WARN}'
+          value: '0'
+          description: 'Alert threshold for number of guests not covered by any backup job.'
         - macro: '{$PVE.CERT.EXPIRY.WARN}'
           value: '2592000'
           description: 'Certificate expiry warning threshold in seconds (default 30 days).'
@@ -2544,6 +3465,20 @@ zabbix_export:
               newvalue: 'No'
         - uuid: 3867f5adb2dc4ae98476c39edacd9e0a
           name: 'Disk SMART status'
+          mappings:
+            - value: '1'
+              newvalue: Healthy
+            - value: '0'
+              newvalue: Unhealthy
+        - uuid: 5b657b6259614309b78203bbf34c69d8
+          name: 'HA quorate'
+          mappings:
+            - value: '1'
+              newvalue: 'Yes'
+            - value: '0'
+              newvalue: 'No'
+        - uuid: e95f4d44c70f4009a532b9ad20922444
+          name: 'ZFS pool health'
           mappings:
             - value: '1'
               newvalue: Healthy
