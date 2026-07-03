@@ -485,6 +485,7 @@ zabbix_export:
               name: 'Proxmox VE: Guests not covered by backup'
               event_name: 'Proxmox VE: {ITEM.LASTVALUE1} guest(s) not covered by any backup job'
               priority: WARNING
+              manual_close: 'YES'
               description: 'There are guests in the cluster that are not included in any backup job.'
               tags:
                 - tag: scope
@@ -2669,6 +2670,7 @@ zabbix_export:
               name: 'Proxmox VE: Node [{#NODE.NAME}]: Subscription not active'
               event_name: 'Proxmox VE: Node [{#NODE.NAME}]: Subscription status is {ITEM.LASTVALUE1}'
               priority: INFO
+              manual_close: 'YES'
               description: 'The subscription on node {#NODE.NAME} is not active.'
               tags:
                 - tag: scope

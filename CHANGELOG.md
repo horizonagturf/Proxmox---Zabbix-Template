@@ -24,6 +24,11 @@ All notable changes to this project will be documented in this file.
 - New value maps: "Disk SMART status", "HA quorate", "ZFS pool health".
 - Documented all additional API paths in the template description.
 
+### Changed
+
+- **Subscription trigger** — added `manual_close: YES` so the "Subscription not active" problem can be manually closed when a paid subscription is not applicable.
+- **Backup not covered trigger** — added `manual_close: YES` so the "Guests not covered by backup" problem can be manually closed when specific guests are intentionally unprotected.
+
 ### Fixed
 
 - Removed the `DOES_NOT_EXIST` filter on `{#QEMU.TAGS}` in QEMU discovery so VMs without any tags are no longer silently excluded.

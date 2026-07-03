@@ -118,7 +118,7 @@ Please provide the necessary access levels for both the User and the Token:
 |Name|Description|Expression|Severity|Dependencies and additional info|
 |----|-----------|----------|--------|--------------------------------|
 |Proxmox VE: API service not available|<p>The API service is not available.</p>|`last(/Proxmox VE by HTTP/proxmox.api.available) <> 200`|High||
-|Proxmox VE: Guests not covered by backup|<p>Guests not included in any backup job.</p>|`last(/Proxmox VE by HTTP/proxmox.backup.notbackedup.count) > {$PVE.BACKUP.NOTBACKEDUP.WARN}`|Warning||
+|Proxmox VE: Guests not covered by backup|<p>Guests not included in any backup job.</p>|`last(/Proxmox VE by HTTP/proxmox.backup.notbackedup.count) > {$PVE.BACKUP.NOTBACKEDUP.WARN}`|Warning|**Manual close**: Yes|
 |Proxmox VE: HA quorum lost|<p>The HA cluster has lost quorum.</p>|`last(/Proxmox VE by HTTP/proxmox.ha.quorum) = 0`|Disaster||
 |Proxmox VE: HA resource(s) in error state|<p>One or more HA-managed resources are in error.</p>|`last(/Proxmox VE by HTTP/proxmox.ha.resources.error) > 0`|High||
 |Proxmox VE: Ceph health WARN|<p>Ceph cluster reporting warning health.</p>|`last(/Proxmox VE by HTTP/proxmox.ceph.health) = "HEALTH_WARN"`|Warning||
@@ -216,7 +216,7 @@ Please provide the necessary access levels for both the User and the Token:
 |Proxmox VE: Node [{#NODE.NAME}]: SMART status fail|<p>One or more disks have a SMART health failure.</p>|`last(...disk.smart) <> 1`|High||
 |Proxmox VE: Node [{#NODE.NAME}]: Replication error|<p>One or more replication jobs have errors.</p>|`last(...replication.errors) > 0`|High||
 |Proxmox VE: Node [{#NODE.NAME}]: ZFS pool degraded|<p>One or more ZFS pools not in ONLINE state.</p>|`last(...zfs.pool.unhealthy) > 0`|High||
-|Proxmox VE: Node [{#NODE.NAME}]: Subscription not active|<p>Subscription is not active.</p>|`last(...subscription.status) <> "active"`|Info||
+|Proxmox VE: Node [{#NODE.NAME}]: Subscription not active|<p>Subscription is not active.</p>|`last(...subscription.status) <> "active"`|Info|**Manual close**: Yes|
 |Proxmox VE: Node [{#NODE.NAME}]: Many pending updates|<p>High number of pending package updates.</p>|`last(...apt.updates.count) > {$PVE.APT.UPDATES.WARN}`|Info||
 |Proxmox VE: Node [{#NODE.NAME}]: Failed tasks in last 24h|<p>Failed tasks in the last 24 hours.</p>|`last(...tasks.failed.count24h) > 0`|Average||
 
