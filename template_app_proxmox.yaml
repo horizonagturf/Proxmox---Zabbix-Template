@@ -2438,7 +2438,7 @@ zabbix_export:
                   parameters:
                     - '-1'
                   error_handler: CUSTOM_VALUE
-                  error_handler_params: '{"data":{}}'
+                  error_handler_params: '{"data":{"status":"notfound"}}'
               url: 'https://{$PVE.URL.HOST}:{$PVE.URL.PORT}/api2/json/nodes/{#NODE.NAME}/subscription'
               headers:
                 - name: Authorization
@@ -2460,7 +2460,7 @@ zabbix_export:
                   parameters:
                     - |
                       var data = JSON.parse(value).data;
-                      if (!data || !data.status) return 'unknown';
+                      if (!data || !data.status) return 'notfound';
                       return data.status;
                 - type: DISCARD_UNCHANGED_HEARTBEAT
                   parameters:
@@ -2666,7 +2666,7 @@ zabbix_export:
                 - tag: scope
                   value: availability
             - uuid: 2274b192390e4cd2ba00cdd0b90e70b6
-              expression: 'last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}]) <> "active" and length(last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}])) > 0 and last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}]) <> "unknown"'
+              expression: 'last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}]) <> "active" and length(last(/Proxmox VE by HTTP/proxmox.node.subscription.status[{#NODE.NAME}])) > 0'
               name: 'Proxmox VE: Node [{#NODE.NAME}]: Subscription not active'
               event_name: 'Proxmox VE: Node [{#NODE.NAME}]: Subscription status is {ITEM.LASTVALUE1}'
               priority: INFO
